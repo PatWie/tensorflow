@@ -81,6 +81,9 @@ __global__ void Correlation_forward(Dtype *output, int Cout, int Hout, int Wout,
                                     Dtype *pInput2, int pad, int kernel_size,
                                     int max_displacement, int stride1,
                                     int stride2) {
+
+  extern __shared__ float shm_patch[];
+
   const int pWin = Win + 2 * pad;
   const int pHin = Hin + 2 * pad;
 
@@ -104,14 +107,28 @@ __global__ void Correlation_forward(Dtype *output, int Cout, int Hout, int Wout,
       int w2 = w1 + ti * stride2;
       int h2 = h1 + tj * stride2;
 
+      // pre-load shm
       for (int j = -kernel_rad; j <= kernel_rad; ++j) {
         for (int i = -kernel_rad; i <= kernel_rad; ++i) {
           for (int ch = c; ch < Cin; ch += THREADS_PER_BLOCK) {
             const int indx1 = n * (pHin * pWin * Cin) +
                               (h1 + j) * (pWin * Cin) + (w1 + i) * Cin + ch;
+            const int rindx1 = j * ((2 * kernel_rad - 1) * Cin) + i * Cin + ch;
+            shm_patch[rindx1] = pInput1[indx1];
+          }
+        }
+      }
+      __syncthreads();
+
+      for (int j = -kernel_rad; j <= kernel_rad; ++j) {
+        for (int i = -kernel_rad; i <= kernel_rad; ++i) {
+          for (int ch = c; ch < Cin; ch += THREADS_PER_BLOCK) {
+            // const int indx1 = n * (pHin * pWin * Cin) +
+            //                   (h1 + j) * (pWin * Cin) + (w1 + i) * Cin + ch;
+            const int rindx1 = j * ((2 * kernel_rad - 1) * Cin) + i * Cin + ch;
             const int indx2 = n * (pHin * pWin * Cin) +
                               (h2 + j) * (pWin * Cin) + (w2 + i) * Cin + ch;
-            thread_accumulation += pInput1[indx1] * pInput2[indx2];
+            thread_accumulation += shm_patch[rindx1] * pInput2[indx2];
           }
         }
       }
@@ -368,8 +385,11 @@ struct CorrelationCostFunctor<GPUDevice, Dtype> {
     dim3 corr_grid(CORR_THREADS_PER_BLOCK);
     dim3 corr_block(N, oH, oW);
 
+    const int kernel_rad = (kernel_size - 1) / 2;
+    const int shm_num = (2 * kernel_rad - 1) * (2 * kernel_rad - 1) * iC;
+
     Correlation_forward<Dtype, CORR_THREADS_PER_BLOCK>
-        <<<corr_block, corr_grid, 0, d.stream()>>>(
+        <<<corr_block, corr_grid, shm_num * sizeof(Dtype), d.stream()>>>(
         output_t->flat<Dtype>().data(), oC, oH, oW,
         padded_a_t.flat<Dtype>().data(), iC, iH, iW,
         padded_b_t.flat<Dtype>().data(), pad, kernel_size, max_displacement,

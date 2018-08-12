@@ -114,3 +114,19 @@ cuda_py_test(
         "//tensorflow/python:constant_op",
     ],
 )
+
+cuda_py_test(
+    name = "correlation_cost_op_benchmark",
+    size = "medium",
+    srcs = ["python/kernel_tests/correlation_cost_op_benchmark.py"],
+    additional_deps = [
+        ":correlation_cost_py",
+        "//third_party/py/numpy",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python:client",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:dtypes",
+        "//tensorflow/python:platform",
+        "//tensorflow/python:constant_op",
+    ],
+)
